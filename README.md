@@ -1,22 +1,25 @@
 # MCP Server - Rust Implementation
 
-A production-ready Model Context Protocol (MCP) server implementation in Rust, following the official MCP specification (2025-03-26).
+A Test Model Context Protocol (MCP) server implementation in Rust, following the official MCP specification (2025-03-26).
 
 ## Features
 
 ### Core MCP Protocol Support
+
 - **Complete MCP 2025-03-26 Implementation**: Full compliance with the latest MCP specification
 - **JSON-RPC 2.0**: Proper message format and error handling
 - **Server Capabilities Negotiation**: Dynamic capability discovery and configuration
 - **Request/Response Validation**: Comprehensive validation according to the specification
 
 ### Transport Layers
+
 - **HTTP Transport**: RESTful API with Server-Sent Events (SSE) for streaming
 - **STDIO Transport**: Standard input/output for subprocess communication
 - **Session Management**: HTTP session tracking with automatic cleanup
 - **CORS Support**: Configurable cross-origin resource sharing
 
 ### Server Features
+
 - **Resources**: File system and HTTP resource providers with subscription support
 - **Tools**: Extensible tool execution framework with validation
 - **Prompts**: Template-based prompt generation with Handlebars support
@@ -24,10 +27,12 @@ A production-ready Model Context Protocol (MCP) server implementation in Rust, f
 - **Completion**: Argument completion for prompts and resources
 
 ### Client Features
+
 - **Sampling**: LLM sampling integration with multiple providers
 - **Roots**: Root directory management for secure file access
 
 ### Security & Production Features
+
 - **Authentication**: API key and JWT token support
 - **Authorization**: Role-based access control
 - **Configuration Management**: TOML-based configuration with validation
@@ -53,6 +58,7 @@ cargo install --path .
 ### Basic Usage
 
 #### Start HTTP Server
+
 ```bash
 # Start with default settings (HTTP on localhost:8080)
 mcp-server start
@@ -62,12 +68,14 @@ mcp-server start --bind 0.0.0.0 --port 9090 --name "My MCP Server"
 ```
 
 #### Start STDIO Server
+
 ```bash
 # Start STDIO transport for subprocess communication
 mcp-server start --stdio
 ```
 
 #### Generate Configuration
+
 ```bash
 # Generate default configuration file
 mcp-server config --output mcp-server.toml
@@ -129,6 +137,7 @@ The server exposes a RESTful API at the configured endpoint:
 - `DELETE /mcp` - Terminate session
 
 #### Example Request
+
 ```bash
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
@@ -159,7 +168,7 @@ echo '{"jsonrpc":"2.0","id":"1","method":"ping"}' | mcp-server start --stdio
 
 ### Project Structure
 
-```
+```ini
 src/
 ├── main.rs              # CLI application entry point
 ├── lib.rs               # Library exports
