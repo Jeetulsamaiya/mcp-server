@@ -1,0 +1,88 @@
+[package]
+name = "mcp-server"
+version = "0.1.0"
+edition = "2021"
+authors = ["MCP Server Team"]
+description = "A production-ready Model Context Protocol (MCP) server implementation in Rust"
+license = "MIT"
+repository = "https://github.com/example/mcp-server"
+keywords = ["mcp", "model-context-protocol", "ai", "llm", "server"]
+categories = ["web-programming", "api-bindings"]
+
+[dependencies]
+# Web framework
+actix-web = "4.4"
+actix-cors = "0.7"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-actix-web = "0.7"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# Configuration
+config = "0.14"
+toml = "0.8"
+
+# UUID generation
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Base64 encoding/decoding
+base64 = "0.21"
+
+# JSON Schema validation
+jsonschema = "0.17"
+
+# Async streams
+futures = "0.3"
+futures-util = "0.3"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# URL parsing
+url = "2.5"
+
+# Template engine for prompts
+handlebars = "4.5"
+
+# File watching for resource updates
+notify = "6.1"
+
+# MIME type detection
+mime_guess = "2.0"
+
+# Async trait support
+async-trait = "0.1"
+
+# Random number generation
+rand = "0.8"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.8"
+
+[[bin]]
+name = "mcp-server"
+path = "src/main.rs"
+
+[lib]
+name = "mcp_server"
+path = "src/lib.rs"

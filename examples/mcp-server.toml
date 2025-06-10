@@ -1,0 +1,89 @@
+# MCP Server Configuration Example
+# This file demonstrates all available configuration options
+
+[server]
+# Server identification
+name = "Example MCP Server"
+version = "1.0.0"
+instructions = """
+This is an example MCP server that demonstrates all available features.
+It provides file system resources, basic tools, and prompt templates.
+"""
+
+# Connection limits
+max_connections = 100
+request_timeout = 30
+
+[transport]
+# Transport type: "http" or "stdio"
+transport_type = "http"
+
+[transport.http]
+# HTTP server configuration
+bind_address = "127.0.0.1"
+port = 8080
+endpoint_path = "/sse"
+
+# CORS configuration
+enable_cors = true
+cors_origins = [
+    "http://localhost:3000",
+    "https://app.example.com",
+    "*"  # Allow all origins (use with caution)
+]
+
+# Session management
+session_timeout = 3600  # 1 hour
+
+# TLS/SSL (optional)
+enable_tls = false
+# cert_file = "/path/to/cert.pem"
+# key_file = "/path/to/key.pem"
+
+[transport.stdio]
+# STDIO transport configuration
+buffer_size = 8192
+enable_stderr_logging = true
+
+[auth]
+# Authentication configuration
+enabled = false
+method = "none"  # "none", "apikey", "bearer", "jwt"
+
+# API keys (when method = "apikey")
+api_keys = [
+    # "your-api-key-here",
+    # "another-api-key"
+]
+
+# JWT configuration (when method = "jwt")
+# jwt_secret = "your-jwt-secret-here"
+token_expiration = 3600  # 1 hour
+
+[logging]
+# Logging configuration
+level = "info"  # "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"
+format = "pretty"  # "json", "pretty", "compact"
+# file = "/var/log/mcp-server.log"  # Optional log file
+enable_request_logging = false
+
+[features]
+# Feature toggles
+resources = true
+tools = true
+prompts = true
+sampling = true
+logging = true
+completion = true
+roots = true
+
+[custom]
+# Custom server-specific configuration
+example_setting = "value"
+numeric_setting = 42
+boolean_setting = true
+
+[custom.nested]
+# Nested custom configuration
+database_url = "sqlite:///tmp/mcp-server.db"
+cache_size = 1000
