@@ -9,7 +9,7 @@
 //! ## Features
 //!
 //! - **Complete MCP Protocol Support**: Full implementation of MCP 2025-03-26 specification
-//! - **Multiple Transports**: HTTP (with SSE) and STDIO transport support
+//! - **Multiple Transports**: HTTP (with streaming) and STDIO transport support
 //! - **Server Features**: Resources, tools, prompts with template support
 //! - **Client Features**: LLM sampling and root directory management
 //! - **Production Ready**: Comprehensive error handling, logging, and configuration

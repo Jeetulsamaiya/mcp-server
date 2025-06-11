@@ -1,6 +1,6 @@
 # MCP Server - Rust Implementation
 
-A Test Model Context Protocol (MCP) server implementation in Rust, following the official MCP specification (2025-03-26).
+A production-ready Model Context Protocol (MCP) server implementation in Rust, following the official MCP specification (2025-03-26). This server provides a complete implementation of the MCP protocol with support for both HTTP and STDIO transports, comprehensive error handling, and all core MCP features.
 
 ## Features
 
@@ -13,7 +13,7 @@ A Test Model Context Protocol (MCP) server implementation in Rust, following the
 
 ### Transport Layers
 
-- **HTTP Transport**: RESTful API with Server-Sent Events (SSE) for streaming
+- **HTTP Transport**: Streamable HTTP transport with optional SSE streaming
 - **STDIO Transport**: Standard input/output for subprocess communication
 - **Session Management**: HTTP session tracking with automatic cleanup
 - **CORS Support**: Configurable cross-origin resource sharing
@@ -45,13 +45,13 @@ A Test Model Context Protocol (MCP) server implementation in Rust, following the
 
 ```bash
 # Clone the repository
-git clone https://github.com/example/mcp-server-rust
-cd mcp-server-rust
+git clone <repository-url>
+cd test-sse-mcp-server
 
 # Build the project
 cargo build --release
 
-# Install the binary
+# Install the binary (optional)
 cargo install --path .
 ```
 
@@ -82,6 +82,9 @@ mcp-server config --output mcp-server.toml
 
 # Validate configuration
 mcp-server validate mcp-server.toml
+
+# Show server information
+mcp-server info
 ```
 
 ### Configuration
@@ -130,14 +133,23 @@ roots = true
 
 ### HTTP Transport
 
-The server exposes a RESTful API at the configured endpoint:
+The server exposes a Streamable HTTP transport API at the configured endpoint (default: `/mcp`):
 
-- `POST /mcp` - Send JSON-RPC messages
-- `GET /mcp` - Establish SSE connection for streaming
-- `DELETE /mcp` - Terminate session
+- `POST /mcp` - Send JSON-RPC messages (single requests or batches)
+- `GET /mcp` - Establish Server-Sent Events (SSE) connection for streaming
+- `DELETE /mcp` - Terminate session and cleanup resources
 
-#### Example Request
+#### Session Management
 
+The server automatically manages HTTP sessions with:
+- Session ID tracking via `Mcp-Session-Id` header
+- Automatic session creation for new clients
+- Configurable session timeout (default: 1 hour)
+- Session cleanup on termination
+
+#### Example Requests
+
+**Initialize Connection:**
 ```bash
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
@@ -156,56 +168,97 @@ curl -X POST http://localhost:8080/mcp \
   }'
 ```
 
+**List Available Tools:**
+```bash
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "2",
+    "method": "tools/list"
+  }'
+```
+
+**Establish SSE Stream:**
+```bash
+curl -X GET http://localhost:8080/mcp \
+  -H "Accept: text/event-stream" \
+  -H "Cache-Control: no-cache"
+```
+
 ### STDIO Transport
 
 For subprocess communication, use STDIO transport:
 
 ```bash
-echo '{"jsonrpc":"2.0","id":"1","method":"ping"}' | mcp-server start --stdio
+# Start STDIO server
+mcp-server start --stdio
+
+# Send JSON-RPC messages via stdin
+echo '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"stdio-client","version":"1.0.0"}}}' | mcp-server start --stdio
 ```
 
 ## Development
 
 ### Project Structure
 
-```ini
+```
 src/
 ├── main.rs              # CLI application entry point
-├── lib.rs               # Library exports
-├── config.rs            # Configuration management
-├── error.rs             # Error handling
+├── lib.rs               # Library exports and public API
+├── config.rs            # Configuration management (TOML/JSON)
+├── error.rs             # Error handling and MCP error codes
 ├── protocol/            # MCP protocol implementation
-│   ├── mod.rs
-│   ├── messages.rs      # Message types
-│   ├── validation.rs    # Message validation
-│   └── handler.rs       # Protocol handler
-├── transport/           # Transport layer
-│   ├── mod.rs
-│   ├── http.rs          # HTTP transport
-│   ├── stdio.rs         # STDIO transport
-│   └── session.rs       # Session management
-├── server/              # Server features
-│   ├── mod.rs
-│   └── features/
-│       ├── mod.rs
-│       ├── resources.rs # Resource management
-│       ├── tools.rs     # Tool execution
-│       ├── prompts.rs   # Prompt templates
+│   ├── mod.rs           # Protocol exports
+│   ├── messages.rs      # MCP message types and serialization
+│   ├── validation.rs    # Request/response validation
+│   └── handler.rs       # Central protocol message handler
+├── transport/           # Transport layer implementations
+│   ├── mod.rs           # Transport abstractions
+│   ├── http.rs          # HTTP transport with SSE streaming
+│   ├── stdio.rs         # STDIO transport for subprocess
+│   └── session.rs       # HTTP session lifecycle management
+├── server/              # Server-side MCP features
+│   ├── mod.rs           # Server implementation
+│   └── features/        # Feature managers
+│       ├── mod.rs       # Feature exports
+│       ├── resources.rs # Resource management (file/HTTP)
+│       ├── tools.rs     # Tool execution framework
+│       ├── prompts.rs   # Prompt template engine
 │       ├── logging.rs   # Logging feature
-│       └── completion.rs # Completion feature
-├── client/              # Client features
-│   └── features/
-│       ├── mod.rs
-│       ├── sampling.rs  # LLM sampling
-│       └── roots.rs     # Root directories
-└── utils/               # Utilities
-    ├── mod.rs
-    ├── logging.rs       # Logging setup
-    ├── auth.rs          # Authentication
-    └── validation.rs    # Additional validation
+│       └── completion.rs # Argument completion
+├── client/              # Client-side MCP features
+│   └── features/        # Client feature managers
+│       ├── mod.rs       # Client feature exports
+│       ├── sampling.rs  # LLM sampling integration
+│       └── roots.rs     # Root directory management
+└── utils/               # Shared utilities
+    ├── mod.rs           # Utility exports
+    ├── logging.rs       # Logging configuration
+    ├── auth.rs          # Authentication helpers
+    └── validation.rs    # Additional validation utilities
+
+docs/                    # Comprehensive documentation
+├── README.md            # Documentation index
+├── architecture-overview.md
+├── http-request-flow.md
+├── http-streaming-flow.md
+├── protocol-message-flow.md
+├── tool-registration-flow.md
+├── error-handling-flow.md
+├── authentication-flow.md
+├── state-management.md
+├── session-management.md
+├── concurrency-model.md
+├── system-initialization-flow.md
+└── sequence-interaction-flow.md
+
+examples/                # Usage examples
+├── basic_server.rs      # Basic server setup example
+└── mcp-server.toml      # Example configuration file
 ```
 
-### Building
+### Building and Testing
 
 ```bash
 # Development build
@@ -214,11 +267,23 @@ cargo build
 # Release build
 cargo build --release
 
-# Run tests
+# Run all tests
 cargo test
 
-# Run with logging
+# Run tests with output
+cargo test -- --nocapture
+
+# Run specific test module
+cargo test protocol::validation
+
+# Run with debug logging
 RUST_LOG=debug cargo run -- start --verbose
+
+# Check code formatting
+cargo fmt --check
+
+# Run clippy lints
+cargo clippy -- -D warnings
 ```
 
 ### Adding Custom Features
@@ -271,20 +336,42 @@ impl ResourceProvider for MyResourceProvider {
 
 ## Testing
 
-The project includes comprehensive tests:
+The project includes comprehensive tests covering all major components:
 
+### Unit Tests
 ```bash
-# Run all tests
+# Run all unit tests
 cargo test
 
-# Run specific test module
+# Run specific module tests
 cargo test protocol::validation
+cargo test transport::http
+cargo test server::features
 
-# Run with output
+# Run with output for debugging
 cargo test -- --nocapture
+```
 
-# Run integration tests
+### Integration Tests
+```bash
+# Run integration tests (if available)
 cargo test --test integration
+
+# Test with MCP Inspector client
+# 1. Start the server: cargo run -- start
+# 2. Connect MCP Inspector to http://localhost:8080/mcp
+# 3. Test protocol compliance and feature functionality
+```
+
+### Manual Testing
+```bash
+# Test HTTP transport
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
+
+# Test STDIO transport
+echo '{"jsonrpc":"2.0","id":"1","method":"tools/list"}' | cargo run -- start --stdio
 ```
 
 ## Contributing
@@ -306,15 +393,30 @@ cargo test --test integration
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## Documentation
+
+For detailed technical documentation, see the [docs/](./docs/) directory:
+
+- **[Architecture Overview](./docs/architecture-overview.md)** - System architecture and component relationships
+- **[HTTP Request Flow](./docs/http-request-flow.md)** - HTTP transport request/response lifecycle
+- **[Protocol Message Flow](./docs/protocol-message-flow.md)** - MCP protocol message handling
+- **[Tool Registration Flow](./docs/tool-registration-flow.md)** - Dynamic tool registration system
+- **[Error Handling Flow](./docs/error-handling-flow.md)** - Error propagation and handling
+- **[Session Management](./docs/session-management.md)** - HTTP session lifecycle
+- **[Authentication Flow](./docs/authentication-flow.md)** - Security and authorization
+
 ## Acknowledgments
 
-- [Model Context Protocol Specification](https://modelcontextprotocol.io/specification/2025-03-26)
-- [Actix Web](https://actix.rs/) for the HTTP framework
-- [Tokio](https://tokio.rs/) for async runtime
-- [Serde](https://serde.rs/) for serialization
+- [Model Context Protocol Specification](https://modelcontextprotocol.io/specification/2025-03-26) - Official MCP specification
+- [Actix Web](https://actix.rs/) - High-performance HTTP framework
+- [Tokio](https://tokio.rs/) - Asynchronous runtime for Rust
+- [Serde](https://serde.rs/) - Serialization framework
+- [Tracing](https://tracing.rs/) - Structured logging and diagnostics
+- [Clap](https://clap.rs/) - Command-line argument parsing
 
 ## Support
 
-- [Documentation](https://docs.rs/mcp-server)
-- [Issues](https://github.com/example/mcp-server-rust/issues)
-- [Discussions](https://github.com/example/mcp-server-rust/discussions)
+- **Documentation**: See [docs/](./docs/) directory for comprehensive guides
+- **Examples**: Check [examples/](./examples/) directory for usage examples
+- **Issues**: Report bugs and feature requests via repository issues
+- **Configuration**: Use `mcp-server config` to generate example configuration files

@@ -1,7 +1,7 @@
 //! Transport layer for MCP server.
 //!
 //! This module provides different transport implementations for the MCP server,
-//! including HTTP (with SSE) and STDIO transports as defined in the specification.
+//! including HTTP (with streaming) and STDIO transports as defined in the specification.
 
 pub mod http;
 pub mod stdio;

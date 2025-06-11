@@ -22,7 +22,7 @@ transport_type = "http"
 # HTTP server configuration
 bind_address = "127.0.0.1"
 port = 8080
-endpoint_path = "/sse"
+endpoint_path = "/mcp"
 
 # CORS configuration
 enable_cors = true

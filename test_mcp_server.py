@@ -11,7 +11,7 @@ import sys
 from typing import Dict, Any, Optional
 
 class MCPTester:
-    def __init__(self, base_url: str = "http://localhost:8080/sse"):
+    def __init__(self, base_url: str = "http://localhost:8080/mcp"):
         self.base_url = base_url
         self.request_id = 1
         

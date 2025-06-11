@@ -62,7 +62,7 @@ impl ProtocolHandler {
             let handler = handler.clone();
             async move {
                 if let Err(e) = handler.setup_production().await {
-                    error!("Failed to setup production resources: {}", e);
+                    error!("Failed to setup resources: {}", e);
                 }
             }
         });
@@ -167,7 +167,7 @@ impl ProtocolHandler {
             info!("Registered code review prompt generator");
         }
 
-        info!("Production resources, tools, and prompts setup completed successfully");
+        info!("resources, tools, and prompts setup completed successfully");
         Ok(())
     }
 

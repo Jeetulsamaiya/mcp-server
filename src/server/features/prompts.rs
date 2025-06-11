@@ -55,13 +55,18 @@ pub struct PromptResult {
 }
 
 impl PromptManager {
-    /// Create a new prompt manager
+    /// Create a new prompt manager with default enabled state
     pub fn new() -> Self {
+        Self::with_enabled(&true)
+    }
+
+    /// Create a new prompt manager with specified enabled state
+    pub fn with_enabled(enabled: &bool) -> Self {
         Self {
             prompts: Arc::new(RwLock::new(HashMap::new())),
             generators: Arc::new(RwLock::new(HashMap::new())),
             handlebars: Arc::new(Handlebars::new()),
-            enabled: Arc::new(RwLock::new(true)),
+            enabled: Arc::new(RwLock::new(*enabled)),
         }
     }
 

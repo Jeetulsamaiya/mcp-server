@@ -1,7 +1,8 @@
 //! HTTP transport implementation for MCP server.
 //!
 //! This module implements the Streamable HTTP transport as defined in the MCP specification,
-//! supporting both regular HTTP requests and Server-Sent Events (SSE) for streaming.
+//! supporting HTTP POST requests with optional SSE streaming for responses and GET requests
+//! for server-initiated SSE streams.
 
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Result as ActixResult};
 use async_trait::async_trait;
@@ -9,7 +10,7 @@ use futures_util;
 use serde_json;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock, oneshot};
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -17,9 +18,7 @@ use crate::config::HttpConfig;
 use crate::error::Result;
 use crate::protocol::parse_message;
 use crate::transport::session::{Session, SessionManager};
-use crate::transport::{
-    Transport, TransportInfo, TransportMessage, TransportMetadata, TransportType,
-};
+use crate::transport::{Transport, TransportInfo, TransportMessage, TransportType};
 
 use std::sync::OnceLock;
 
@@ -97,15 +96,12 @@ impl HttpTransport {
             InitError = (),
         >,
     > {
-        let app = App::new()
-            .app_data(web::Data::new(state.clone()))
-            .service(
-                web::resource(&state.config.endpoint_path)
-                    .route(web::post().to(handle_jsonrpc_request))
-                    .route(web::get().to(handle_get_request))
-                    .route(web::delete().to(handle_delete_request)),
-            )
-            .service(web::resource("/message").route(web::post().to(handle_post_request)));
+        let app = App::new().app_data(web::Data::new(state.clone())).service(
+            web::resource(&state.config.endpoint_path)
+                .route(web::post().to(handle_streamable_http_post))
+                .route(web::get().to(handle_streamable_http_get))
+                .route(web::delete().to(handle_delete_request)),
+        );
 
         app
     }
@@ -216,13 +212,14 @@ impl Transport for HttpTransport {
     }
 }
 
-/// Handle JSON-RPC requests with immediate response
-async fn handle_jsonrpc_request(
+/// Handle Streamable HTTP POST requests
+/// Supports both single JSON responses and SSE streaming based on request content
+async fn handle_streamable_http_post(
     req: HttpRequest,
     body: web::Bytes,
     state: web::Data<AppState>,
 ) -> ActixResult<HttpResponse> {
-    info!("Handling JSON-RPC request");
+    info!("Handling Streamable HTTP POST request");
 
     // Validate Origin header for security
     if let Some(origin) = req.headers().get("Origin") {
@@ -236,75 +233,18 @@ async fn handle_jsonrpc_request(
         }
     }
 
-    // Parse the request body
-    let body_str = String::from_utf8_lossy(&body);
-    let request = match serde_json::from_str::<crate::protocol::JsonRpcRequest>(&body_str) {
-        Ok(req) => req,
-        Err(e) => {
-            error!("Failed to parse JSON-RPC request: {}", e);
-            error!("Request body: {}", body_str);
-            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32700,
-                    "message": "Parse error"
-                },
-                "id": null
-            })));
-        }
-    };
+    // Validate Accept header - must support both application/json and text/event-stream
+    let accept_header = req
+        .headers()
+        .get("Accept")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
 
-    info!("Processing JSON-RPC method: {}", request.method);
-
-    // Save the request ID for error handling
-    let request_id = request.id.clone();
-
-    // Use the shared protocol handler from the app state
-    let protocol_handler = &state.protocol_handler;
-
-    info!(
-        "Using protocol handler instance: {:p}",
-        protocol_handler.as_ref()
-    );
-
-    // Process the request directly
-    match protocol_handler.handle_request(request).await {
-        Ok(response) => {
-            info!("JSON-RPC request processed successfully");
-            Ok(HttpResponse::Ok().json(response))
-        }
-        Err(e) => {
-            error!("Failed to process JSON-RPC request: {}", e);
-            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32603,
-                    "message": format!("Internal error: {}", e)
-                },
-                "id": request_id
-            })))
-        }
-    }
-}
-
-/// Handle POST requests (sending messages to server)
-async fn handle_post_request(
-    req: HttpRequest,
-    body: web::Bytes,
-    state: web::Data<AppState>,
-) -> ActixResult<HttpResponse> {
-    info!("Handling POST request");
-
-    // Validate Origin header for security
-    if let Some(origin) = req.headers().get("Origin") {
-        if let Ok(origin_str) = origin.to_str() {
-            if !is_origin_allowed(origin_str, &state.config.cors_origins) {
-                warn!("Rejected request from unauthorized origin: {}", origin_str);
-                return Ok(HttpResponse::Forbidden().json(serde_json::json!({
-                    "error": "Origin not allowed"
-                })));
-            }
-        }
+    if !accept_header.contains("application/json") || !accept_header.contains("text/event-stream") {
+        warn!("Invalid Accept header: {}", accept_header);
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Accept header must include both application/json and text/event-stream"
+        })));
     }
 
     // Get or create session
@@ -312,10 +252,12 @@ async fn handle_post_request(
 
     // Parse the request body
     let body_str = String::from_utf8_lossy(&body);
-    let message = match parse_message(&body_str) {
-        Ok(msg) => msg,
+
+    // Try to parse as single message or batch
+    let messages = match parse_message_or_batch(&body_str) {
+        Ok(msgs) => msgs,
         Err(e) => {
-            error!("Failed to parse message: {}", e);
+            error!("Failed to parse JSON-RPC message(s): {}", e);
             return Ok(HttpResponse::BadRequest().json(serde_json::json!({
                 "jsonrpc": "2.0",
                 "error": {
@@ -327,74 +269,86 @@ async fn handle_post_request(
         }
     };
 
-    // Create transport message with metadata
-    let metadata = TransportMetadata {
-        timestamp: chrono::Utc::now(),
-        source_addr: req.peer_addr(),
-        user_agent: req
-            .headers()
-            .get("User-Agent")
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_string()),
-        headers: req
-            .headers()
-            .iter()
-            .filter_map(|(name, value)| {
-                value
-                    .to_str()
-                    .ok()
-                    .map(|v| (name.to_string(), v.to_string()))
-            })
-            .collect(),
-    };
+    // Check if all messages are responses or notifications (no requests)
+    let has_requests = messages
+        .iter()
+        .any(|msg| matches!(msg, crate::protocol::AnyJsonRpcMessage::Request(_)));
 
-    let transport_message = TransportMessage {
-        message,
-        session_id: Some(session_id.clone()),
-        client_id: None,
-        metadata,
-    };
-
-    // Send message to protocol handler and wait for response
-    let sender = state.message_sender.read().await;
-    if let Some(sender) = sender.as_ref() {
-        if let Err(e) = sender.send(transport_message).await {
-            error!("Failed to send message to protocol handler: {}", e);
-            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32603,
-                    "message": "Internal error"
-                },
-                "id": null
-            })));
-        }
+    if !has_requests {
+        // Only responses/notifications - return 202 Accepted
+        info!("Received only responses/notifications, returning 202 Accepted");
+        return Ok(HttpResponse::Accepted().finish());
     }
 
-    Ok(HttpResponse::Accepted().json(serde_json::json!({})))
+    // Has requests - process them and decide response format
+    let protocol_handler = &state.protocol_handler;
+
+    // For now, return JSON response for single requests
+    // TODO: Implement SSE streaming for complex scenarios
+    if messages.len() == 1 {
+        if let crate::protocol::AnyJsonRpcMessage::Request(request) = &messages[0] {
+            info!("Processing single JSON-RPC request: {}", request.method);
+
+            match protocol_handler.handle_request(request.clone()).await {
+                Ok(response) => {
+                    info!("Request processed successfully");
+                    let mut http_response = HttpResponse::Ok().json(response);
+
+                    // Include session ID in response header if present
+                    if let Some(session_id) = get_session_id(&req) {
+                        http_response.headers_mut().insert(
+                            actix_web::http::header::HeaderName::from_static("mcp-session-id"),
+                            actix_web::http::header::HeaderValue::from_str(&session_id).unwrap(),
+                        );
+                    }
+
+                    Ok(http_response)
+                }
+                Err(e) => {
+                    error!("Failed to process request: {}", e);
+                    Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32603,
+                            "message": format!("Internal error: {}", e)
+                        },
+                        "id": request.id
+                    })))
+                }
+            }
+        } else {
+            Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": "Expected request message"
+            })))
+        }
+    } else {
+        // Multiple messages - would need SSE streaming
+        // For now, return error
+        Ok(HttpResponse::NotImplemented().json(serde_json::json!({
+            "error": "Batch requests not yet implemented"
+        })))
+    }
 }
 
-/// Handle GET requests (SSE streams)
-async fn handle_get_request(
+/// Handle Streamable HTTP GET requests
+/// Opens an optional SSE stream for server-initiated messages
+async fn handle_streamable_http_get(
     req: HttpRequest,
     state: web::Data<AppState>,
 ) -> ActixResult<HttpResponse> {
-    info!("Handling GET request for SSE stream");
+    info!("Handling Streamable HTTP GET request");
 
     // Validate Origin header for security
     if let Some(origin) = req.headers().get("Origin") {
         if let Ok(origin_str) = origin.to_str() {
             if !is_origin_allowed(origin_str, &state.config.cors_origins) {
-                warn!(
-                    "Rejected SSE request from unauthorized origin: {}",
-                    origin_str
-                );
+                warn!("Rejected request from unauthorized origin: {}", origin_str);
                 return Ok(HttpResponse::Forbidden().finish());
             }
         }
     }
 
-    // Check Accept header
+    // Check Accept header - must support text/event-stream
     let accepts_sse = req
         .headers()
         .get("Accept")
@@ -409,9 +363,22 @@ async fn handle_get_request(
     // Get or create session
     let session_id = get_or_create_session(&req, &state.session_manager).await?;
 
-    // Create SSE stream
+    // Check for Last-Event-ID header for resumability
+    let last_event_id = req
+        .headers()
+        .get("Last-Event-ID")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+
+    if let Some(event_id) = &last_event_id {
+        info!("Resuming stream from event ID: {}", event_id);
+        // TODO: Implement stream resumption logic
+    }
+
+    // Create SSE stream for server-initiated messages
+    // For now, just send a connection confirmation
     let stream = futures_util::stream::iter(vec![Ok::<_, actix_web::Error>(web::Bytes::from(
-        "data: {\"type\":\"connected\"}\n\n",
+        "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}\n\n",
     ))]);
 
     Ok(HttpResponse::Ok()
@@ -466,6 +433,23 @@ fn get_session_id(req: &HttpRequest) -> Option<String> {
         .get("Mcp-Session-Id")
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string())
+}
+
+/// Parse a single JSON-RPC message or batch of messages
+fn parse_message_or_batch(body: &str) -> Result<Vec<crate::protocol::AnyJsonRpcMessage>> {
+    // Try to parse as array first (batch)
+    if let Ok(batch) = serde_json::from_str::<Vec<serde_json::Value>>(body) {
+        let mut messages = Vec::new();
+        for value in batch {
+            let message = parse_message(&serde_json::to_string(&value)?)?;
+            messages.push(message);
+        }
+        Ok(messages)
+    } else {
+        // Parse as single message
+        let message = parse_message(body)?;
+        Ok(vec![message])
+    }
 }
 
 /// Check if origin is allowed
