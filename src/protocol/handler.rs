@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::client::features::SamplingManager;
 use crate::error::{McpError, Result};
@@ -15,6 +15,8 @@ use crate::protocol::{
     validation, AnyJsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, RequestId,
 };
 use crate::server::features::{PromptManager, ResourceManager, ToolManager};
+
+
 
 /// Protocol handler for processing MCP messages
 #[derive(Clone)]
@@ -55,12 +57,12 @@ impl ProtocolHandler {
             initialized: Arc::new(RwLock::new(false)),
         };
 
-        // Initialize with some default resources, tools, and prompts for testing
+        // Initialize with production-ready resources, tools, and prompts
         tokio::spawn({
             let handler = handler.clone();
             async move {
-                if let Err(e) = handler.setup_defaults().await {
-                    error!("Failed to setup default resources: {}", e);
+                if let Err(e) = handler.setup_production().await {
+                    error!("Failed to setup production resources: {}", e);
                 }
             }
         });
@@ -68,87 +70,104 @@ impl ProtocolHandler {
         handler
     }
 
-    /// Setup default resources, tools, and prompts for testing
-    async fn setup_defaults(&self) -> Result<()> {
-        // Add a simple text resource
-        let text_resource = crate::protocol::Resource {
-            uri: "text://hello".to_string(),
-            name: "Hello World".to_string(),
-            description: Some("A simple hello world text resource".to_string()),
-            mime_type: Some("text/plain".to_string()),
-            annotations: None,
-            size: Some(13),
+
+
+    /// Register production tools dynamically using available tool handlers
+    async fn register_production_tools(&self) -> Result<()> {
+        info!("Registering production tools dynamically");
+
+        // Get all available production tool handlers
+        let tool_handlers = crate::server::features::tools::get_production_tool_handlers();
+
+        // Register all tool handlers with their definitions
+        if let Err(e) = self.tool_manager.register_handlers(tool_handlers).await {
+            warn!("Failed to register some tool handlers: {}", e);
+        }
+
+        let tool_count = self.tool_manager.get_tool_count().await;
+        info!("Successfully registered {} production tools", tool_count);
+
+        Ok(())
+    }
+
+    /// Setup production-ready resources, tools, and prompts
+    async fn setup_production(&self) -> Result<()> {
+        // Register file system resource provider for local file access
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let fs_provider = Box::new(crate::server::features::resources::FileSystemProvider::new(
+            current_dir,
+        ));
+        if let Err(e) = self.resource_manager.register_provider(fs_provider).await {
+            warn!("Failed to register file system resource provider: {}", e);
+        } else {
+            info!("Registered file system resource provider for local file access");
+        }
+
+        // Register HTTP resource provider for web resource access
+        let http_provider = Box::new(crate::server::features::resources::HttpProvider::new());
+        if let Err(e) = self.resource_manager.register_provider(http_provider).await {
+            warn!("Failed to register HTTP resource provider: {}", e);
+        } else {
+            info!("Registered HTTP resource provider for web resource access");
+        }
+
+        // Register all production tools dynamically
+        if let Err(e) = self.register_production_tools().await {
+            warn!("Failed to register production tools: {}", e);
+        }
+
+        // Add code review prompt for code analysis
+        let code_review_prompt = crate::protocol::Prompt {
+            name: "code_review".to_string(),
+            description: Some(
+                "Generate a code review prompt for analyzing code quality".to_string(),
+            ),
+            arguments: Some(vec![
+                crate::protocol::PromptArgument {
+                    name: "code".to_string(),
+                    description: Some("The code to review".to_string()),
+                    required: Some(true),
+                },
+                crate::protocol::PromptArgument {
+                    name: "language".to_string(),
+                    description: Some("Programming language of the code".to_string()),
+                    required: Some(false),
+                },
+                crate::protocol::PromptArgument {
+                    name: "focus".to_string(),
+                    description: Some(
+                        "Focus area for review (general, security, performance, style, bugs)"
+                            .to_string(),
+                    ),
+                    required: Some(false),
+                },
+            ]),
         };
 
-        if let Err(e) = self.resource_manager.register_resource(text_resource).await {
-            warn!("Failed to register default text resource: {}", e);
-        }
-
-        // Register a simple text resource provider
-        let text_provider = Box::new(SimpleTextProvider::new());
-        if let Err(e) = self.resource_manager.register_provider(text_provider).await {
-            warn!("Failed to register text resource provider: {}", e);
-        }
-
-        // Add a simple echo tool
-        let echo_tool = crate::protocol::Tool {
-            name: "echo".to_string(),
-            description: Some("Echo back the input text".to_string()),
-            input_schema: crate::protocol::ToolInputSchema {
-                schema_type: "object".to_string(),
-                properties: Some({
-                    let mut props = std::collections::HashMap::new();
-                    props.insert(
-                        "name".to_string(),
-                        serde_json::json!({
-                            "type": "string",
-                            "description": "Text to echo back"
-                        }),
-                    );
-                    props
-                }),
-                required: Some(vec!["text".to_string()]),
-            },
-            annotations: None,
-        };
-
-        if let Err(e) = self.tool_manager.register_tool(echo_tool).await {
-            warn!("Failed to register default echo tool: {}", e);
-        }
-
-        // Register the echo tool handler
-        let echo_handler = Box::new(crate::server::features::tools::EchoToolHandler);
-        if let Err(e) = self.tool_manager.register_handler(echo_handler).await {
-            warn!("Failed to register echo tool handler: {}", e);
-        }
-
-        // Add a simple greeting prompt
-        let greeting_prompt = crate::protocol::Prompt {
-            name: "greeting".to_string(),
-            description: Some("Generate a greeting message".to_string()),
-            arguments: Some(vec![crate::protocol::PromptArgument {
-                name: "name".to_string(),
-                description: Some("Name to greet".to_string()),
-                required: Some(false),
-            }]),
-        };
-
-        if let Err(e) = self.prompt_manager.register_prompt(greeting_prompt).await {
-            warn!("Failed to register default greeting prompt: {}", e);
-        }
-
-        // Register the greeting prompt generator
-        let greeting_generator =
-            Box::new(crate::server::features::prompts::GreetingPromptGenerator);
         if let Err(e) = self
             .prompt_manager
-            .register_generator(greeting_generator)
+            .register_prompt(code_review_prompt)
             .await
         {
-            warn!("Failed to register greeting prompt generator: {}", e);
+            warn!("Failed to register code review prompt: {}", e);
+        } else {
+            info!("Registered code review prompt for code analysis");
         }
 
-        info!("Default resources, tools, and prompts setup completed");
+        // Register the code review prompt generator
+        let code_review_generator =
+            Box::new(crate::server::features::prompts::CodeReviewPromptGenerator);
+        if let Err(e) = self
+            .prompt_manager
+            .register_generator(code_review_generator)
+            .await
+        {
+            warn!("Failed to register code review prompt generator: {}", e);
+        } else {
+            info!("Registered code review prompt generator");
+        }
+
+        info!("Production resources, tools, and prompts setup completed successfully");
         Ok(())
     }
 
@@ -869,68 +888,6 @@ impl ProtocolHandler {
 
     async fn handle_message_notification(&self, _notification: &JsonRpcNotification) -> Result<()> {
         info!("Message notification received");
-        Ok(())
-    }
-}
-
-/// Simple text resource provider for testing
-pub struct SimpleTextProvider;
-
-impl SimpleTextProvider {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::server::features::resources::ResourceProvider for SimpleTextProvider {
-    fn name(&self) -> &str {
-        "simple-text"
-    }
-
-    fn can_handle(&self, uri: &str) -> bool {
-        uri.starts_with("text://")
-    }
-
-    async fn read_resource(
-        &self,
-        uri: &str,
-    ) -> crate::error::Result<Vec<crate::protocol::ResourceContents>> {
-        match uri {
-            "text://hello" => Ok(vec![crate::protocol::ResourceContents::Text {
-                uri: uri.to_string(),
-                mime_type: Some("text/plain".to_string()),
-                text: "Hello, World! This is a simple text resource from the MCP server."
-                    .to_string(),
-            }]),
-            _ => Err(crate::error::McpError::Resource(format!(
-                "Unknown text resource: {}",
-                uri
-            ))),
-        }
-    }
-
-    async fn list_resources(
-        &self,
-        _pattern: Option<&str>,
-    ) -> crate::error::Result<Vec<crate::protocol::Resource>> {
-        Ok(vec![crate::protocol::Resource {
-            uri: "text://hello".to_string(),
-            name: "Hello World".to_string(),
-            description: Some("A simple hello world text resource".to_string()),
-            mime_type: Some("text/plain".to_string()),
-            annotations: None,
-            size: Some(65),
-        }])
-    }
-
-    async fn subscribe(&self, _uri: &str) -> crate::error::Result<()> {
-        // No-op for simple text provider
-        Ok(())
-    }
-
-    async fn unsubscribe(&self, _uri: &str) -> crate::error::Result<()> {
-        // No-op for simple text provider
         Ok(())
     }
 }

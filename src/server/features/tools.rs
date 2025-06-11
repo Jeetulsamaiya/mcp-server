@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::error::{McpError, Result};
 use crate::protocol::{Content, PaginationParams, PaginationResult, Tool};
@@ -30,6 +30,29 @@ pub struct ToolManager {
 pub trait ToolHandler: Send + Sync {
     /// Get the handler name
     fn name(&self) -> &str;
+
+    /// Get the tool description
+    fn description(&self) -> Option<String> {
+        None
+    }
+
+    /// Get the tool input schema
+    fn input_schema(&self) -> crate::protocol::ToolInputSchema;
+
+    /// Get the tool annotations (optional)
+    fn annotations(&self) -> Option<crate::protocol::ToolAnnotations> {
+        None
+    }
+
+    /// Get the complete tool definition
+    fn tool_definition(&self) -> crate::protocol::Tool {
+        crate::protocol::Tool {
+            name: self.name().to_string(),
+            description: self.description(),
+            input_schema: self.input_schema(),
+            annotations: self.annotations(),
+        }
+    }
 
     /// Execute the tool with given arguments
     async fn execute(&self, arguments: Option<Value>) -> Result<ToolResult>;
@@ -128,7 +151,7 @@ impl ToolManager {
         }
 
         // Check if tool exists
-        let tool = self
+        let _tool = self
             .get_tool(name)
             .await
             .ok_or_else(|| McpError::Tool(format!("Tool not found: {}", name)))?;
@@ -163,6 +186,35 @@ impl ToolManager {
         }
 
         info!("Registered tool handler: {}", name);
+        Ok(())
+    }
+
+    /// Register a tool handler and automatically create the tool definition from it
+    pub async fn register_handler_with_tool(&self, handler: Box<dyn ToolHandler>) -> Result<()> {
+        if !self.is_enabled() {
+            return Err(McpError::Tool("Tool feature is disabled".to_string()));
+        }
+
+        let tool_definition = handler.tool_definition();
+        let name = handler.name().to_string();
+
+        // Register the tool definition first
+        self.register_tool(tool_definition).await?;
+
+        // Then register the handler
+        self.register_handler(handler).await?;
+
+        info!("Registered tool and handler: {}", name);
+        Ok(())
+    }
+
+    /// Register multiple tool handlers dynamically
+    pub async fn register_handlers(&self, handlers: Vec<Box<dyn ToolHandler>>) -> Result<()> {
+        for handler in handlers {
+            if let Err(e) = self.register_handler_with_tool(handler).await {
+                warn!("Failed to register tool handler: {}", e);
+            }
+        }
         Ok(())
     }
 
@@ -283,6 +335,30 @@ impl ToolHandler for EchoToolHandler {
         "echo"
     }
 
+    fn description(&self) -> Option<String> {
+        Some("Echo back the provided message".to_string())
+    }
+
+    fn input_schema(&self) -> crate::protocol::ToolInputSchema {
+        use std::collections::HashMap;
+
+        crate::protocol::ToolInputSchema {
+            schema_type: "object".to_string(),
+            properties: Some({
+                let mut props = HashMap::new();
+                props.insert(
+                    "message".to_string(),
+                    serde_json::json!({
+                        "type": "string",
+                        "description": "The message to echo back"
+                    }),
+                );
+                props
+            }),
+            required: Some(vec!["message".to_string()]),
+        }
+    }
+
     async fn execute(&self, arguments: Option<Value>) -> Result<ToolResult> {
         info!("Executing echo tool with arguments: {:?}", arguments);
         let message = if let Some(args) = arguments {
@@ -321,6 +397,45 @@ pub struct CalculatorToolHandler;
 impl ToolHandler for CalculatorToolHandler {
     fn name(&self) -> &str {
         "calculator"
+    }
+
+    fn description(&self) -> Option<String> {
+        Some("Perform mathematical calculations".to_string())
+    }
+
+    fn input_schema(&self) -> crate::protocol::ToolInputSchema {
+        use std::collections::HashMap;
+
+        crate::protocol::ToolInputSchema {
+            schema_type: "object".to_string(),
+            properties: Some({
+                let mut props = HashMap::new();
+                props.insert(
+                    "operation".to_string(),
+                    serde_json::json!({
+                        "type": "string",
+                        "description": "Mathematical operation to perform",
+                        "enum": ["add", "subtract", "multiply", "divide", "power", "sqrt"]
+                    }),
+                );
+                props.insert(
+                    "a".to_string(),
+                    serde_json::json!({
+                        "type": "number",
+                        "description": "First operand"
+                    }),
+                );
+                props.insert(
+                    "b".to_string(),
+                    serde_json::json!({
+                        "type": "number",
+                        "description": "Second operand (not required for sqrt)"
+                    }),
+                );
+                props
+            }),
+            required: Some(vec!["operation".to_string(), "a".to_string()]),
+        }
     }
 
     async fn execute(&self, arguments: Option<Value>) -> Result<ToolResult> {
@@ -404,6 +519,15 @@ impl ToolHandler for CalculatorToolHandler {
 
         Ok(())
     }
+}
+
+/// Get all available production tool handlers
+pub fn get_production_tool_handlers() -> Vec<Box<dyn ToolHandler>> {
+    vec![
+        Box::new(CalculatorToolHandler),
+        // Uncomment to enable echo tool for testing
+        // Box::new(EchoToolHandler),
+    ]
 }
 
 #[cfg(test)]
@@ -492,5 +616,53 @@ mod tests {
         });
         let result = handler.execute(Some(args)).await.unwrap();
         assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_tool_registration() {
+        let manager = ToolManager::new();
+
+        // Test registering a tool handler with automatic tool definition
+        let handler = Box::new(CalculatorToolHandler);
+        assert!(manager.register_handler_with_tool(handler).await.is_ok());
+
+        // Verify the tool was registered
+        let tool = manager.get_tool("calculator").await;
+        assert!(tool.is_some());
+        let tool = tool.unwrap();
+        assert_eq!(tool.name, "calculator");
+        assert!(tool.description.is_some());
+        assert_eq!(tool.description.unwrap(), "Perform mathematical calculations");
+
+        // Verify the tool appears in the list
+        let (tools, _) = manager.list_tools(None).await.unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "calculator");
+
+        // Test tool execution
+        let args = serde_json::json!({
+            "operation": "add",
+            "a": 2.0,
+            "b": 3.0
+        });
+        let result = manager.call_tool("calculator", Some(args)).await.unwrap();
+        assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn test_production_tool_handlers() {
+        let handlers = get_production_tool_handlers();
+        assert!(!handlers.is_empty());
+
+        // Verify all handlers have valid names and schemas
+        for handler in handlers {
+            assert!(!handler.name().is_empty());
+            let schema = handler.input_schema();
+            assert_eq!(schema.schema_type, "object");
+
+            // Verify tool definition can be created
+            let tool_def = handler.tool_definition();
+            assert_eq!(tool_def.name, handler.name());
+        }
     }
 }

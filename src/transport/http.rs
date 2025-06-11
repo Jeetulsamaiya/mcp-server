@@ -5,14 +5,16 @@
 
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Result as ActixResult};
 use async_trait::async_trait;
+use futures_util;
+use serde_json;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, error, info, warn};
+use tokio::sync::{mpsc, RwLock, oneshot};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::config::HttpConfig;
-use crate::error::{McpError, Result, TransportError};
+use crate::error::Result;
 use crate::protocol::parse_message;
 use crate::transport::session::{Session, SessionManager};
 use crate::transport::{
@@ -56,6 +58,7 @@ pub struct HttpTransport {
     config: HttpConfig,
     session_manager: Arc<SessionManager>,
     message_sender: Arc<RwLock<Option<mpsc::Sender<TransportMessage>>>>,
+    shutdown_sender: Arc<RwLock<Option<oneshot::Sender<()>>>>,
 }
 
 /// Shared application state
@@ -78,6 +81,7 @@ impl HttpTransport {
             config,
             session_manager,
             message_sender: Arc::new(RwLock::new(None)),
+            shutdown_sender: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -138,20 +142,40 @@ impl Transport for HttpTransport {
             bind_addr, self.config.endpoint_path
         );
 
-        let server = HttpServer::new(move || Self::create_app(state.clone()))
-            .bind(&bind_addr)
-            .map_err(|e| {
-                McpError::Transport(TransportError::ConnectionFailed(format!(
-                    "Failed to bind to {}: {}",
-                    bind_addr, e
-                )))
-            })?;
+        // Create shutdown channel
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-        // Start the server
-        let server_future = server.run();
+        // Store the shutdown sender
+        {
+            let mut sender = self.shutdown_sender.write().await;
+            *sender = Some(shutdown_tx);
+        }
+
+        // Clone the bind address for the spawned task
+        let bind_addr_clone = bind_addr.clone();
+
+        // Start the server in a separate task to avoid Send issues
         tokio::spawn(async move {
-            if let Err(e) = server_future.await {
-                error!("HTTP server error: {}", e);
+            let server = match HttpServer::new(move || Self::create_app(state.clone()))
+                .bind(&bind_addr_clone)
+            {
+                Ok(server) => server,
+                Err(e) => {
+                    error!("Failed to bind to {}: {}", bind_addr_clone, e);
+                    return;
+                }
+            };
+
+            let server_handle = server.run();
+            tokio::select! {
+                result = server_handle => {
+                    if let Err(e) = result {
+                        error!("HTTP server error: {}", e);
+                    }
+                }
+                _ = shutdown_rx => {
+                    info!("HTTP server shutdown signal received");
+                }
             }
         });
 
@@ -160,6 +184,22 @@ impl Transport for HttpTransport {
 
     async fn stop(&self) -> Result<()> {
         info!("Stopping HTTP transport");
+
+        // Send shutdown signal
+        let mut shutdown_sender = self.shutdown_sender.write().await;
+        if let Some(sender) = shutdown_sender.take() {
+            if let Err(_) = sender.send(()) {
+                warn!("Failed to send shutdown signal to HTTP server (receiver may have been dropped)");
+            }
+        }
+
+        // Clear message sender
+        {
+            let mut message_sender = self.message_sender.write().await;
+            *message_sender = None;
+        }
+
+        info!("HTTP transport stopped");
         Ok(())
     }
 
@@ -202,6 +242,7 @@ async fn handle_jsonrpc_request(
         Ok(req) => req,
         Err(e) => {
             error!("Failed to parse JSON-RPC request: {}", e);
+            error!("Request body: {}", body_str);
             return Ok(HttpResponse::BadRequest().json(serde_json::json!({
                 "jsonrpc": "2.0",
                 "error": {
