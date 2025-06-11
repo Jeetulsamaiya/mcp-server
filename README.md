@@ -46,7 +46,7 @@ A Test Model Context Protocol (MCP) server implementation in Rust, following the
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd test-sse-mcp-server
+cd mcp-server
 
 # Build the project
 cargo build --release
