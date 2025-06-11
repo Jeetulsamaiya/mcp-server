@@ -2,8 +2,8 @@
 name = "mcp-server"
 version = "0.1.0"
 edition = "2021"
-authors = ["MCP Server Team"]
-description = "A production-ready Model Context Protocol (MCP) server implementation in Rust"
+authors = ["Jeetul Samaiya"]
+description = "A Test Model Context Protocol (MCP) server implementation in Rust"
 license = "MIT"
 repository = "https://github.com/example/mcp-server"
 keywords = ["mcp", "model-context-protocol", "ai", "llm", "server"]

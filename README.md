@@ -1,6 +1,6 @@
 # MCP Server - Rust Implementation
 
-A production-ready Model Context Protocol (MCP) server implementation in Rust, following the official MCP specification (2025-03-26). This server provides a complete implementation of the MCP protocol with support for both HTTP and STDIO transports, comprehensive error handling, and all core MCP features.
+A Test Model Context Protocol (MCP) server implementation in Rust, following the official MCP specification (2025-03-26). This server provides a complete implementation of the MCP protocol with support for both HTTP and STDIO transports, comprehensive error handling, and all core MCP features.
 
 ## Features
 
@@ -142,6 +142,7 @@ The server exposes a Streamable HTTP transport API at the configured endpoint (d
 #### Session Management
 
 The server automatically manages HTTP sessions with:
+
 - Session ID tracking via `Mcp-Session-Id` header
 - Automatic session creation for new clients
 - Configurable session timeout (default: 1 hour)
@@ -150,6 +151,7 @@ The server automatically manages HTTP sessions with:
 #### Example Requests
 
 **Initialize Connection:**
+
 ```bash
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
@@ -169,6 +171,7 @@ curl -X POST http://localhost:8080/mcp \
 ```
 
 **List Available Tools:**
+
 ```bash
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
@@ -180,6 +183,7 @@ curl -X POST http://localhost:8080/mcp \
 ```
 
 **Establish SSE Stream:**
+
 ```bash
 curl -X GET http://localhost:8080/mcp \
   -H "Accept: text/event-stream" \
@@ -202,7 +206,7 @@ echo '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion
 
 ### Project Structure
 
-```
+```ini
 src/
 ├── main.rs              # CLI application entry point
 ├── lib.rs               # Library exports and public API
@@ -339,6 +343,7 @@ impl ResourceProvider for MyResourceProvider {
 The project includes comprehensive tests covering all major components:
 
 ### Unit Tests
+
 ```bash
 # Run all unit tests
 cargo test
@@ -353,6 +358,7 @@ cargo test -- --nocapture
 ```
 
 ### Integration Tests
+
 ```bash
 # Run integration tests (if available)
 cargo test --test integration
@@ -364,6 +370,7 @@ cargo test --test integration
 ```
 
 ### Manual Testing
+
 ```bash
 # Test HTTP transport
 curl -X POST http://localhost:8080/mcp \
