@@ -26,6 +26,10 @@ pub struct Config {
     /// Feature configuration
     pub features: FeatureConfig,
 
+    /// Tools configuration
+    #[serde(default)]
+    pub tools: crate::server::features::tools::ToolsConfig,
+
     /// Custom server-specific settings
     #[serde(default)]
     pub custom: HashMap<String, serde_json::Value>,
@@ -288,6 +292,7 @@ impl Default for Config {
             auth: AuthConfig::default(),
             logging: LoggingConfig::default(),
             features: FeatureConfig::default(),
+            tools: crate::server::features::tools::ToolsConfig::default(),
             custom: HashMap::new(),
         }
     }

@@ -1,0 +1,56 @@
+# Example tool configuration for MCP server
+# This demonstrates how to configure the dynamic tool handler system
+
+[server]
+name = "mcp-server-rust"
+version = "0.1.0"
+instructions = "A Model Context Protocol server with dynamic tool handlers"
+
+[transport]
+transport_type = "http"
+
+[transport.http]
+bind = "127.0.0.1"
+port = 8080
+
+[features]
+tools = true
+resources = true
+prompts = true
+
+# Dynamic tool handler configuration
+[tools]
+# Whether to automatically discover built-in tool handlers
+auto_discover_builtin = true
+
+# Whether to enable all discovered handlers by default
+enable_all_by_default = true
+
+# Specific tool handler configurations
+[[tools.handlers]]
+name = "echo"
+enabled = true
+priority = 100
+
+# Custom configuration for the echo tool
+[tools.handlers.config]
+default_message = "Hello from dynamic tool system!"
+
+[[tools.handlers]]
+name = "calculator"
+enabled = true
+priority = 90
+
+# Custom configuration for the calculator tool
+[tools.handlers.config]
+precision = 10
+allow_complex = false
+
+# Example of a disabled tool handler
+[[tools.handlers]]
+name = "example_disabled_tool"
+enabled = false
+priority = 50
+
+[tools.handlers.config]
+reason = "This tool is disabled for demonstration"

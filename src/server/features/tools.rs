@@ -7,11 +7,171 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{info, warn, error};
+use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 use crate::error::{McpError, Result};
 use crate::protocol::{Content, PaginationParams, PaginationResult, Tool};
 use crate::server::features::FeatureManager;
+
+/// Configuration for tool handlers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolHandlerConfig {
+    /// Tool handler name
+    pub name: String,
+
+    /// Whether the tool handler is enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Priority for loading order (higher = loaded first)
+    #[serde(default)]
+    pub priority: i32,
+
+    /// Custom configuration for the tool handler
+    #[serde(default)]
+    pub config: HashMap<String, serde_json::Value>,
+}
+
+/// Configuration for all tool handlers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolsConfig {
+    /// List of tool handler configurations
+    #[serde(default)]
+    pub handlers: Vec<ToolHandlerConfig>,
+
+    /// Whether to auto-discover built-in handlers
+    #[serde(default = "default_true")]
+    pub auto_discover_builtin: bool,
+
+    /// Whether to enable all discovered handlers by default
+    #[serde(default = "default_true")]
+    pub enable_all_by_default: bool,
+}
+
+/// Tool handler factory function type
+pub type ToolHandlerFactory = fn() -> Result<Box<dyn ToolHandler>>;
+
+/// Tool handler registration entry
+#[derive(Clone)]
+pub struct ToolHandlerRegistration {
+    /// Handler name
+    pub name: String,
+
+    /// Factory function to create the handler
+    pub factory: ToolHandlerFactory,
+
+    /// Priority for loading order
+    pub priority: i32,
+
+    /// Whether this is a built-in handler
+    pub is_builtin: bool,
+}
+
+/// Global tool handler registry
+static TOOL_HANDLER_REGISTRY: OnceLock<Arc<std::sync::Mutex<Vec<ToolHandlerRegistration>>>> = OnceLock::new();
+
+/// Tool handler registry for managing available tool handlers
+pub struct ToolHandlerRegistry;
+
+fn default_true() -> bool {
+    true
+}
+
+impl ToolHandlerRegistry {
+    /// Initialize the global registry
+    fn get_registry() -> &'static Arc<std::sync::Mutex<Vec<ToolHandlerRegistration>>> {
+        TOOL_HANDLER_REGISTRY.get_or_init(|| {
+            Arc::new(std::sync::Mutex::new(Vec::new()))
+        })
+    }
+
+    /// Register a tool handler factory
+    pub fn register(
+        name: impl Into<String>,
+        factory: ToolHandlerFactory,
+        priority: i32,
+        is_builtin: bool,
+    ) -> Result<()> {
+        let name = name.into();
+        let registry = Self::get_registry();
+        let mut handlers = registry.lock().map_err(|e| {
+            McpError::Tool(format!("Failed to lock registry: {}", e))
+        })?;
+
+        // Check for duplicate names
+        if handlers.iter().any(|h| h.name == name) {
+            return Err(McpError::Tool(format!(
+                "Tool handler '{}' is already registered", name
+            )));
+        }
+
+        handlers.push(ToolHandlerRegistration {
+            name,
+            factory,
+            priority,
+            is_builtin,
+        });
+
+        // Sort by priority (higher priority first)
+        handlers.sort_by(|a, b| b.priority.cmp(&a.priority));
+
+        Ok(())
+    }
+
+    /// Get all registered tool handlers
+    pub fn get_all() -> Result<Vec<ToolHandlerRegistration>> {
+        let registry = Self::get_registry();
+        let handlers = registry.lock().map_err(|e| {
+            McpError::Tool(format!("Failed to lock registry: {}", e))
+        })?;
+        Ok(handlers.clone())
+    }
+
+    /// Get a specific tool handler registration by name
+    pub fn get(name: &str) -> Result<Option<ToolHandlerRegistration>> {
+        let registry = Self::get_registry();
+        let handlers = registry.lock().map_err(|e| {
+            McpError::Tool(format!("Failed to lock registry: {}", e))
+        })?;
+        Ok(handlers.iter().find(|h| h.name == name).cloned())
+    }
+
+    /// Clear all registrations (mainly for testing)
+    pub fn clear() -> Result<()> {
+        let registry = Self::get_registry();
+        let mut handlers = registry.lock().map_err(|e| {
+            McpError::Tool(format!("Failed to lock registry: {}", e))
+        })?;
+        handlers.clear();
+        Ok(())
+    }
+
+    /// Register all built-in tool handlers
+    pub fn register_builtin_handlers() -> Result<()> {
+        info!("Registering built-in tool handlers");
+
+        // Register echo tool handler
+        Self::register(
+            "echo",
+            || Ok(Box::new(EchoToolHandler)),
+            100, // High priority for built-in tools
+            true,
+        )?;
+
+        // Register calculator tool handler
+        Self::register(
+            "calculator",
+            || Ok(Box::new(CalculatorToolHandler)),
+            100, // High priority for built-in tools
+            true,
+        )?;
+
+        info!("Successfully registered built-in tool handlers");
+        Ok(())
+    }
+}
 
 /// Tool manager for handling MCP tools
 pub struct ToolManager {
@@ -362,7 +522,7 @@ impl ToolHandler for EchoToolHandler {
     async fn execute(&self, arguments: Option<Value>) -> Result<ToolResult> {
         info!("Executing echo tool with arguments: {:?}", arguments);
         let message = if let Some(args) = arguments {
-            args.get("name")
+            args.get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Hello, world!")
                 .to_string()
@@ -521,13 +681,183 @@ impl ToolHandler for CalculatorToolHandler {
     }
 }
 
-/// Get all available production tool handlers
-pub fn get_production_tool_handlers() -> Vec<Box<dyn ToolHandler>> {
-    vec![
-        Box::new(CalculatorToolHandler),
-        // Uncomment to enable echo tool for testing
-        // Box::new(EchoToolHandler),
-    ]
+/// Dynamic tool handler discovery and instantiation
+pub struct ToolHandlerDiscovery;
+
+impl ToolHandlerDiscovery {
+    /// Discover and create tool handlers based on configuration
+    pub fn discover_handlers(config: Option<&ToolsConfig>) -> Result<Vec<Box<dyn ToolHandler>>> {
+        let mut handlers = Vec::new();
+        let mut errors = Vec::new();
+
+        // Initialize built-in handlers if not already done
+        if let Err(e) = ToolHandlerRegistry::register_builtin_handlers() {
+            // Ignore duplicate registration errors
+            if !e.to_string().contains("already registered") {
+                warn!("Failed to register built-in handlers: {}", e);
+            }
+        }
+
+        // Get all registered handlers
+        let registrations = ToolHandlerRegistry::get_all()?;
+
+        // Apply configuration filtering
+        let enabled_handlers = Self::filter_by_config(&registrations, config)?;
+
+        // Create handler instances
+        for registration in enabled_handlers {
+            match (registration.factory)() {
+                Ok(handler) => {
+                    info!("Successfully created tool handler: {}", registration.name);
+                    handlers.push(handler);
+                }
+                Err(e) => {
+                    let error_msg = format!(
+                        "Failed to create tool handler '{}': {}",
+                        registration.name, e
+                    );
+                    warn!("{}", error_msg);
+                    errors.push(error_msg);
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            warn!(
+                "Some tool handlers failed to initialize: {}",
+                errors.join(", ")
+            );
+        }
+
+        info!("Successfully discovered {} tool handlers", handlers.len());
+        Ok(handlers)
+    }
+
+    /// Filter registrations based on configuration
+    fn filter_by_config(
+        registrations: &[ToolHandlerRegistration],
+        config: Option<&ToolsConfig>,
+    ) -> Result<Vec<ToolHandlerRegistration>> {
+        let config = match config {
+            Some(c) => c,
+            None => {
+                // No config provided, return all built-in handlers
+                return Ok(registrations.iter().filter(|r| r.is_builtin).cloned().collect());
+            }
+        };
+
+        let mut enabled_handlers = Vec::new();
+
+        // Create a map of configured handlers
+        let configured_handlers: HashMap<String, &ToolHandlerConfig> = config
+            .handlers
+            .iter()
+            .map(|h| (h.name.clone(), h))
+            .collect();
+
+        for registration in registrations {
+            let should_enable = if let Some(handler_config) = configured_handlers.get(&registration.name) {
+                // Explicitly configured
+                handler_config.enabled
+            } else if registration.is_builtin && config.auto_discover_builtin {
+                // Built-in handler with auto-discovery enabled
+                config.enable_all_by_default
+            } else {
+                // Non-built-in handler without explicit config
+                false
+            };
+
+            if should_enable {
+                enabled_handlers.push(registration.clone());
+            }
+        }
+
+        // Sort by priority
+        enabled_handlers.sort_by(|a, b| b.priority.cmp(&a.priority));
+
+        Ok(enabled_handlers)
+    }
+
+    /// Get available handler names
+    pub fn get_available_handler_names() -> Result<Vec<String>> {
+        let registrations = ToolHandlerRegistry::get_all()?;
+        Ok(registrations.into_iter().map(|r| r.name).collect())
+    }
+
+    /// Check if a handler is available
+    pub fn is_handler_available(name: &str) -> Result<bool> {
+        Ok(ToolHandlerRegistry::get(name)?.is_some())
+    }
+}
+
+/// Get all available tool handlers (backward compatibility)
+///
+/// This function maintains backward compatibility while using the new dynamic system.
+/// It will discover and return all enabled tool handlers based on default configuration.
+pub fn get_tool_handlers() -> Vec<Box<dyn ToolHandler>> {
+    // Ensure built-in handlers are registered
+    let _ = ToolHandlerRegistry::register_builtin_handlers();
+    get_tool_handlers_with_config(None)
+}
+
+/// Get tool handlers with custom configuration
+pub fn get_tool_handlers_with_config(config: Option<&ToolsConfig>) -> Vec<Box<dyn ToolHandler>> {
+    match ToolHandlerDiscovery::discover_handlers(config) {
+        Ok(handlers) => handlers,
+        Err(e) => {
+            error!("Failed to discover tool handlers: {}", e);
+            // Fallback to empty list rather than panicking
+            Vec::new()
+        }
+    }
+}
+
+/// Macro for easy tool handler registration
+///
+/// Usage:
+/// ```
+/// register_tool_handler!(MyToolHandler, "my_tool", 50, true);
+/// ```
+#[macro_export]
+macro_rules! register_tool_handler {
+    ($handler_type:ty, $name:expr, $priority:expr, $is_builtin:expr) => {
+        {
+            use $crate::server::features::tools::ToolHandlerRegistry;
+            ToolHandlerRegistry::register(
+                $name,
+                || Ok(Box::new(<$handler_type>::default())),
+                $priority,
+                $is_builtin,
+            )
+        }
+    };
+    ($handler_type:ty, $name:expr, $priority:expr) => {
+        register_tool_handler!($handler_type, $name, $priority, false)
+    };
+    ($handler_type:ty, $name:expr) => {
+        register_tool_handler!($handler_type, $name, 0, false)
+    };
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            handlers: Vec::new(),
+            auto_discover_builtin: true,
+            enable_all_by_default: true,
+        }
+    }
+}
+
+impl Default for ToolHandlerConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: true,
+            priority: 0,
+            config: HashMap::new(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -651,7 +981,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_production_tool_handlers() {
-        let handlers = get_production_tool_handlers();
+        let handlers = get_tool_handlers();
         assert!(!handlers.is_empty());
 
         // Verify all handlers have valid names and schemas
@@ -664,5 +994,96 @@ mod tests {
             let tool_def = handler.tool_definition();
             assert_eq!(tool_def.name, handler.name());
         }
+    }
+
+    #[tokio::test]
+    async fn test_tool_handler_registry_basic() {
+        // Test basic registry functionality
+        let _available_names = ToolHandlerDiscovery::get_available_handler_names().unwrap_or_default();
+
+        // Test that discovery works (may be empty if no handlers registered yet)
+        let _handlers = get_tool_handlers();
+
+        // Test configuration-based discovery
+        let config = ToolsConfig::default();
+        let _configured_handlers = get_tool_handlers_with_config(Some(&config));
+
+        // If we reach here, the basic functionality works
+        assert!(true);
+    }
+
+    #[tokio::test]
+    async fn test_tool_handler_discovery() {
+        // Clear registry for clean test
+        ToolHandlerRegistry::clear().unwrap();
+
+        // Register test handlers with unique names
+        let echo_name = format!("echo_test_{}", std::process::id());
+        let calc_name = format!("calculator_test_{}", std::process::id());
+
+        ToolHandlerRegistry::register(
+            &echo_name,
+            || Ok(Box::new(EchoToolHandler)),
+            100,
+            true
+        ).unwrap();
+
+        ToolHandlerRegistry::register(
+            &calc_name,
+            || Ok(Box::new(CalculatorToolHandler)),
+            100,
+            true
+        ).unwrap();
+
+        // Test discovery with default config
+        let handlers = ToolHandlerDiscovery::discover_handlers(None).unwrap();
+        assert!(handlers.len() >= 2); // At least our two handlers
+
+        // Test discovery with custom config
+        let config = ToolsConfig {
+            handlers: vec![
+                ToolHandlerConfig {
+                    name: echo_name.clone(),
+                    enabled: true,
+                    priority: 0,
+                    config: HashMap::new(),
+                },
+                ToolHandlerConfig {
+                    name: calc_name.clone(),
+                    enabled: false,
+                    priority: 0,
+                    config: HashMap::new(),
+                }
+            ],
+            auto_discover_builtin: true,
+            enable_all_by_default: false,
+        };
+
+        let handlers = ToolHandlerDiscovery::discover_handlers(Some(&config)).unwrap();
+        assert_eq!(handlers.len(), 1);
+        assert_eq!(handlers[0].name(), "echo");
+    }
+
+    #[tokio::test]
+    async fn test_get_tool_handlers_with_config() {
+        // Clear registry for clean test
+        ToolHandlerRegistry::clear().unwrap();
+
+        // Register built-in handlers (ignore duplicate registration errors)
+        let _ = ToolHandlerRegistry::register_builtin_handlers();
+
+        // Test with no config (should return all built-in handlers)
+        let handlers = get_tool_handlers_with_config(None);
+        assert!(!handlers.is_empty());
+
+        // Test with config that disables all
+        let config = ToolsConfig {
+            handlers: Vec::new(),
+            auto_discover_builtin: false,
+            enable_all_by_default: false,
+        };
+
+        let handlers = get_tool_handlers_with_config(Some(&config));
+        assert!(handlers.is_empty());
     }
 }

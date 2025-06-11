@@ -57,11 +57,11 @@ impl ProtocolHandler {
             initialized: Arc::new(RwLock::new(false)),
         };
 
-        // Initialize with production-ready resources, tools, and prompts
+        // Initialize resources, tools, and prompts
         tokio::spawn({
             let handler = handler.clone();
             async move {
-                if let Err(e) = handler.setup_production().await {
+                if let Err(e) = handler.setup().await {
                     error!("Failed to setup resources: {}", e);
                 }
             }
@@ -73,15 +73,25 @@ impl ProtocolHandler {
 
 
     /// Register production tools dynamically using available tool handlers
-    async fn register_production_tools(&self) -> Result<()> {
+    async fn register_tools(&self) -> Result<()> {
+        self.register_tools_with_config(None).await
+    }
+
+    /// Register tools with custom configuration
+    async fn register_tools_with_config(&self, config: Option<&crate::server::features::tools::ToolsConfig>) -> Result<()> {
         info!("Registering production tools dynamically");
 
-        // Get all available production tool handlers
-        let tool_handlers = crate::server::features::tools::get_production_tool_handlers();
+        // Get all available production tool handlers using the dynamic discovery system
+        let tool_handlers = crate::server::features::tools::get_tool_handlers_with_config(config);
+
+        if tool_handlers.is_empty() {
+            warn!("No tool handlers were discovered");
+            return Ok(());
+        }
 
         // Register all tool handlers with their definitions
         if let Err(e) = self.tool_manager.register_handlers(tool_handlers).await {
-            warn!("Failed to register some tool handlers: {}", e);
+            error!("Failed to register some tool handlers: {}", e);
         }
 
         let tool_count = self.tool_manager.get_tool_count().await;
@@ -90,15 +100,15 @@ impl ProtocolHandler {
         Ok(())
     }
 
-    /// Setup production-ready resources, tools, and prompts
-    async fn setup_production(&self) -> Result<()> {
+    /// Setup -ready resources, tools, and prompts
+    async fn setup(&self) -> Result<()> {
         // Register file system resource provider for local file access
         let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let fs_provider = Box::new(crate::server::features::resources::FileSystemProvider::new(
             current_dir,
         ));
         if let Err(e) = self.resource_manager.register_provider(fs_provider).await {
-            warn!("Failed to register file system resource provider: {}", e);
+            error!("Failed to register file system resource provider: {}", e);
         } else {
             info!("Registered file system resource provider for local file access");
         }
@@ -106,14 +116,14 @@ impl ProtocolHandler {
         // Register HTTP resource provider for web resource access
         let http_provider = Box::new(crate::server::features::resources::HttpProvider::new());
         if let Err(e) = self.resource_manager.register_provider(http_provider).await {
-            warn!("Failed to register HTTP resource provider: {}", e);
+            error!("Failed to register HTTP resource provider: {}", e);
         } else {
             info!("Registered HTTP resource provider for web resource access");
         }
 
-        // Register all production tools dynamically
-        if let Err(e) = self.register_production_tools().await {
-            warn!("Failed to register production tools: {}", e);
+        // Register all  tools dynamically
+        if let Err(e) = self.register_tools().await {
+            error!("Failed to register  tools: {}", e);
         }
 
         // Add code review prompt for code analysis
@@ -149,7 +159,7 @@ impl ProtocolHandler {
             .register_prompt(code_review_prompt)
             .await
         {
-            warn!("Failed to register code review prompt: {}", e);
+            error!("Failed to register code review prompt: {}", e);
         } else {
             info!("Registered code review prompt for code analysis");
         }
@@ -162,7 +172,7 @@ impl ProtocolHandler {
             .register_generator(code_review_generator)
             .await
         {
-            warn!("Failed to register code review prompt generator: {}", e);
+            error!("Failed to register code review prompt generator: {}", e);
         } else {
             info!("Registered code review prompt generator");
         }
@@ -295,7 +305,7 @@ impl ProtocolHandler {
             }
             "notifications/message" => self.handle_message_notification(&notification).await,
             _ => {
-                warn!("Unknown notification method: {}", notification.method);
+                error!("Unknown notification method: {}", notification.method);
                 Ok(())
             }
         }
@@ -315,7 +325,7 @@ impl ProtocolHandler {
         };
 
         if !was_active {
-            warn!("Received response for unknown request: {:?}", response.id);
+            error!("Received response for unknown request: {:?}", response.id);
         }
 
         if let Some(error) = &response.error {
@@ -383,7 +393,7 @@ impl ProtocolHandler {
 
         // Validate protocol version
         if init_request.protocol_version != crate::protocol::PROTOCOL_VERSION {
-            warn!(
+            error!(
                 "Client requested protocol version {}, server supports {}",
                 init_request.protocol_version,
                 crate::protocol::PROTOCOL_VERSION
