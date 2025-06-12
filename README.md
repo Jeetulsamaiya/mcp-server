@@ -1,6 +1,6 @@
 # MCP Server - Rust Implementation
 
-A Test Model Context Protocol (MCP) server implementation in Rust, following the official MCP specification (2025-03-26). This server provides a complete implementation of the MCP protocol with support for both HTTP and STDIO transports, comprehensive error handling, and all core MCP features.
+A Test Model Context Protocol (MCP) server implementation in Rust, following the official MCP specification (2025-03-26). This server provides a complete implementation of the MCP protocol with streamable HTTP transport support, comprehensive error handling, and all core MCP features.
 
 ## Features
 
@@ -13,8 +13,7 @@ A Test Model Context Protocol (MCP) server implementation in Rust, following the
 
 ### Transport Layers
 
-- **HTTP Transport**: Streamable HTTP transport with optional SSE streaming
-- **STDIO Transport**: Standard input/output for subprocess communication
+- **HTTP Transport**: Streamable HTTP transport with Server-Sent Events (SSE) streaming
 - **Session Management**: HTTP session tracking with automatic cleanup
 - **CORS Support**: Configurable cross-origin resource sharing
 
@@ -67,12 +66,7 @@ mcp-server start
 mcp-server start --bind 0.0.0.0 --port 9090 --name "My MCP Server"
 ```
 
-#### Start STDIO Server
 
-```bash
-# Start STDIO transport for subprocess communication
-mcp-server start --stdio
-```
 
 #### Generate Configuration
 
@@ -190,17 +184,7 @@ curl -X GET http://localhost:8080/mcp \
   -H "Cache-Control: no-cache"
 ```
 
-### STDIO Transport
 
-For subprocess communication, use STDIO transport:
-
-```bash
-# Start STDIO server
-mcp-server start --stdio
-
-# Send JSON-RPC messages via stdin
-echo '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"stdio-client","version":"1.0.0"}}}' | mcp-server start --stdio
-```
 
 ## Development
 
@@ -220,7 +204,6 @@ src/
 ├── transport/           # Transport layer implementations
 │   ├── mod.rs           # Transport abstractions
 │   ├── http.rs          # HTTP transport with SSE streaming
-│   ├── stdio.rs         # STDIO transport for subprocess
 │   └── session.rs       # HTTP session lifecycle management
 ├── server/              # Server-side MCP features
 │   ├── mod.rs           # Server implementation
@@ -377,8 +360,7 @@ curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
 
-# Test STDIO transport
-echo '{"jsonrpc":"2.0","id":"1","method":"tools/list"}' | cargo run -- start --stdio
+
 ```
 
 ## Contributing

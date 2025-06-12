@@ -1,10 +1,9 @@
 //! Transport layer for MCP server.
 //!
-//! This module provides different transport implementations for the MCP server,
-//! including HTTP (with streaming) and STDIO transports as defined in the specification.
+//! This module provides the HTTP transport implementation for the MCP server,
+//! supporting streamable HTTP with Server-Sent Events (SSE) as defined in the specification.
 
 pub mod http;
-pub mod stdio;
 pub mod session;
 
 use async_trait::async_trait;
@@ -82,7 +81,6 @@ pub struct TransportInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransportType {
     Http,
-    Stdio,
 }
 
 impl Default for TransportMetadata {
@@ -140,17 +138,8 @@ impl TransportFactory {
                     .ok_or_else(|| crate::error::McpError::Config(
                         "HTTP transport selected but no HTTP config provided".to_string()
                     ))?;
-                
+
                 let transport = http::HttpTransport::new(http_config.clone())?;
-                Ok(Arc::new(transport))
-            }
-            crate::config::TransportType::Stdio => {
-                let stdio_config = config.stdio.as_ref()
-                    .ok_or_else(|| crate::error::McpError::Config(
-                        "STDIO transport selected but no STDIO config provided".to_string()
-                    ))?;
-                
-                let transport = stdio::StdioTransport::new(stdio_config.clone())?;
                 Ok(Arc::new(transport))
             }
         }

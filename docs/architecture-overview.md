@@ -151,14 +151,12 @@ graph TB
 ### Client Layer
 - **MCP Inspector Client**: Official MCP client from modelcontextprotocol/inspector for testing and debugging
 - **HTTP Client**: Any HTTP client supporting JSON-RPC over HTTP with optional SSE streaming
-- **STDIO Client**: Clients using standard input/output communication for subprocess integration
 - **Web Client**: Browser-based clients with CORS support for web applications
 
 ### Transport Layer
 - **HTTP Transport**: Actix Web-based HTTP server with Server-Sent Events (SSE) streaming support
-- **STDIO Transport**: Standard input/output transport for subprocess communication and embedded use
 - **Session Manager**: HTTP session lifecycle management with automatic cleanup and timeout handling
-- **Transport Manager**: Unified transport abstraction supporting multiple concurrent transports
+- **Transport Manager**: Unified transport abstraction supporting HTTP transport
 
 ### Protocol Layer
 - **Protocol Handler**: Central JSON-RPC 2.0 message router and processor with comprehensive method support

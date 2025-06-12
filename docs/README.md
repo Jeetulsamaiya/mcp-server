@@ -1,6 +1,6 @@
 # MCP Server Documentation
 
-This directory contains comprehensive documentation for the MCP (Model Context Protocol) server implementation in Rust. The server provides a production-ready implementation of the MCP specification (2025-03-26) with support for both HTTP and STDIO transports, built using the Actix Web framework.
+This directory contains comprehensive documentation for the MCP (Model Context Protocol) server implementation in Rust. The server provides a production-ready implementation of the MCP specification (2025-03-26) with streamable HTTP transport support, built using the Actix Web framework.
 
 ## Architecture Overview
 
@@ -32,7 +32,7 @@ The MCP server is built with a clean, modular architecture that separates concer
 ## Key Features
 
 - **Protocol Compliance**: Full MCP 2025-03-26 specification implementation
-- **Dual Transport Support**: HTTP with SSE streaming and STDIO for subprocess communication
+- **HTTP Transport Support**: HTTP with SSE streaming for real-time communication
 - **Dynamic Tool Registration**: Extensible tool system with runtime registration capabilities
 - **Session Management**: Automatic HTTP session tracking, cleanup, and timeout handling
 - **Error Handling**: Comprehensive error propagation with proper MCP error codes
@@ -45,7 +45,6 @@ The MCP server is built with a clean, modular architecture that separates concer
 
 - **MCP Inspector Compatibility**: Designed to work seamlessly with the MCP Inspector client from modelcontextprotocol/inspector
 - **Streamable HTTP Transport**: Default `/mcp` endpoint supporting both single requests and SSE streaming
-- **STDIO Transport**: Full subprocess communication support for embedded use cases
 - **JSON-RPC 2.0**: Complete message handling with proper error responses and batch support
 - **CORS Support**: Configurable cross-origin resource sharing for web clients
 - **Session Persistence**: HTTP session management with automatic cleanup and timeout handling
@@ -67,7 +66,6 @@ To understand the system architecture, start with the [Architecture Overview](./
 For implementation details, refer to the source code in the `src/` directory:
 - `src/protocol/handler.rs` - Central protocol message handler and routing
 - `src/transport/http.rs` - HTTP transport with SSE streaming implementation
-- `src/transport/stdio.rs` - STDIO transport for subprocess communication
 - `src/server/features/` - Feature implementations (tools, resources, prompts, etc.)
 - `src/config.rs` - Configuration management and validation
 - `src/error.rs` - Error handling and MCP error code mapping

@@ -15,7 +15,7 @@ max_connections = 100
 request_timeout = 30
 
 [transport]
-# Transport type: "http" or "stdio"
+# Transport type: "http" only
 transport_type = "http"
 
 [transport.http]
@@ -40,10 +40,7 @@ enable_tls = false
 # cert_file = "/path/to/cert.pem"
 # key_file = "/path/to/key.pem"
 
-[transport.stdio]
-# STDIO transport configuration
-buffer_size = 8192
-enable_stderr_logging = true
+
 
 [auth]
 # Authentication configuration

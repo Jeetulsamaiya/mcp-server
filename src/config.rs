@@ -59,15 +59,12 @@ pub struct ServerConfig {
 /// Transport layer configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransportConfig {
-    /// Transport type (http or stdio)
+    /// Transport type (http only)
     #[serde(default = "default_transport_type")]
     pub transport_type: TransportType,
 
     /// HTTP-specific configuration
     pub http: Option<HttpConfig>,
-
-    /// STDIO-specific configuration
-    pub stdio: Option<StdioConfig>,
 }
 
 /// Transport type enumeration
@@ -75,7 +72,6 @@ pub struct TransportConfig {
 #[serde(rename_all = "lowercase")]
 pub enum TransportType {
     Http,
-    Stdio,
 }
 
 /// HTTP transport configuration
@@ -116,17 +112,7 @@ pub struct HttpConfig {
     pub key_file: Option<PathBuf>,
 }
 
-/// STDIO transport configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StdioConfig {
-    /// Buffer size for stdin/stdout
-    #[serde(default = "default_buffer_size")]
-    pub buffer_size: usize,
 
-    /// Enable stderr logging
-    #[serde(default = "default_enable_stderr_logging")]
-    pub enable_stderr_logging: bool,
-}
 
 /// Authentication and authorization configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,12 +238,7 @@ fn default_enable_cors() -> bool {
 fn default_session_timeout() -> u64 {
     3600
 }
-fn default_buffer_size() -> usize {
-    8192
-}
-fn default_enable_stderr_logging() -> bool {
-    true
-}
+
 fn default_token_expiration() -> u64 {
     3600
 }
@@ -287,7 +268,6 @@ impl Default for Config {
             transport: TransportConfig {
                 transport_type: default_transport_type(),
                 http: Some(HttpConfig::default()),
-                stdio: Some(StdioConfig::default()),
             },
             auth: AuthConfig::default(),
             logging: LoggingConfig::default(),
@@ -314,14 +294,7 @@ impl Default for HttpConfig {
     }
 }
 
-impl Default for StdioConfig {
-    fn default() -> Self {
-        Self {
-            buffer_size: default_buffer_size(),
-            enable_stderr_logging: default_enable_stderr_logging(),
-        }
-    }
-}
+
 
 impl Default for AuthConfig {
     fn default() -> Self {
@@ -391,13 +364,6 @@ impl Config {
                 if self.transport.http.is_none() {
                     return Err(McpError::Config(
                         "HTTP transport selected but no HTTP config provided".to_string(),
-                    ));
-                }
-            }
-            TransportType::Stdio => {
-                if self.transport.stdio.is_none() {
-                    return Err(McpError::Config(
-                        "STDIO transport selected but no STDIO config provided".to_string(),
                     ));
                 }
             }

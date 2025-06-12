@@ -94,14 +94,7 @@ flowchart TD
     V2 --> W1[Configure Session Manager<br/>Session Lifecycle]
     W1 --> W2[Start Cleanup Tasks<br/>Background Processes]
 
-    %% STDIO Transport Path with Error Handling
-    R -->|STDIO| X1[Create StdioTransport<br/>Process Communication]
-    X1 --> X2[Validate STDIO Config<br/>buffer_size, stderr_logging]
-    X2 --> X3{STDIO Config<br/>Valid?}
-    X3 -->|No| ERR10[STDIO Config Error<br/>Invalid Buffer Size]
-    X3 -->|Yes| Y1[Setup STDIN Handler<br/>Async Reader]
-    Y1 --> Y2[Setup STDOUT Handler<br/>Async Writer]
-    Y2 --> Y3[Configure Line Protocol<br/>JSON-RPC over Lines]
+
 
     %% Tool Registration Phase with Validation
     W2 --> Z1[Dynamic Tool Registration<br/>Runtime Registration]
@@ -206,13 +199,10 @@ flowchart TD
     CCC1 --> JJJ1
     JJJ1 --> JJJ2[Serialize Response<br/>JSON Serialization]
     JJJ2 --> KKK1[Send Response via Transport<br/>Transport Layer]
-    KKK1 --> KKK2{Transport<br/>Type?}
-    KKK2 -->|HTTP| LLL1[Stream via HTTP/SSE<br/>HTTP Response]
-    KKK2 -->|STDIO| LLL2[Write to STDOUT<br/>Line Protocol]
+    KKK1 --> LLL1[Stream via HTTP/SSE<br/>HTTP Response]
 
     %% Loop Back - Continuous Processing
     LLL1 ==> PP1
-    LLL2 ==> PP1
     UU1 ==> PP1
     VV1 ==> PP1
     WW1 ==> PP1
@@ -1963,7 +1953,6 @@ sequenceDiagram
 
     Builder->>+TM: Initialize transport manager
     TM->>TM: Create HTTP transport
-    TM->>TM: Create STDIO transport
     TM->>TM: Configure session manager
     TM-->>-Builder: Transport ready
 
@@ -1977,7 +1966,6 @@ sequenceDiagram
     CLI->>+Server: Start server
     Server->>+TM: Start transports
     TM->>TM: Bind HTTP server
-    TM->>TM: Setup STDIO handlers
     TM-->>-Server: Transports started
 
     Server->>+Health: Perform health check
@@ -2123,13 +2111,11 @@ graph TB
 
     subgraph "Transport Layer"
         HTTP[HTTP Transport<br/>Actix Web + SSE]
-        STDIO[STDIO Transport<br/>Process Communication]
         SessionMgr[Session Manager<br/>HTTP Sessions]
-        TransportMgr[Transport Manager<br/>Multi-transport]
+        TransportMgr[Transport Manager<br/>HTTP Transport]
 
         HTTP --> SessionMgr
         HTTP --> TransportMgr
-        STDIO --> TransportMgr
     end
 
     subgraph "Server Core"
@@ -2158,7 +2144,6 @@ graph TB
 
     %% Cross-cutting concerns
     Config -.-> HTTP
-    Config -.-> STDIO
     Config -.-> FM
     Config -.-> PH
 
@@ -2179,7 +2164,7 @@ graph TB
     class Logging,Runtime,Channels infrastructure
     class RM,TM,PM,SM,LM,CM features
     class PH,VM,MM protocol
-    class HTTP,STDIO,SessionMgr,TransportMgr transport
+    class HTTP,SessionMgr,TransportMgr transport
     class ServerCore,HealthCheck,ShutdownMgr server
 ```
 

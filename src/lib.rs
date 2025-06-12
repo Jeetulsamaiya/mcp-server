@@ -3,13 +3,13 @@
 //! A production-ready Model Context Protocol (MCP) server implementation in Rust.
 //!
 //! This library provides a complete implementation of the MCP specification (2025-03-26)
-//! with support for both HTTP and STDIO transports, comprehensive error handling,
+//! with streamable HTTP transport support, comprehensive error handling,
 //! and all core MCP features including resources, tools, prompts, and sampling.
 //!
 //! ## Features
 //!
 //! - **Complete MCP Protocol Support**: Full implementation of MCP 2025-03-26 specification
-//! - **Multiple Transports**: HTTP (with streaming) and STDIO transport support
+//! - **Streamable HTTP Transport**: HTTP transport with Server-Sent Events (SSE) streaming
 //! - **Server Features**: Resources, tools, prompts with template support
 //! - **Client Features**: LLM sampling and root directory management
 //! - **Production Ready**: Comprehensive error handling, logging, and configuration

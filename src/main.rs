@@ -55,10 +55,6 @@ enum Commands {
         /// HTTP port
         #[arg(long, default_value = "8080")]
         port: u16,
-
-        /// Use STDIO transport instead of HTTP
-        #[arg(long)]
-        stdio: bool,
     },
 
     /// Generate a default configuration file
@@ -97,9 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             instructions,
             bind,
             port,
-            stdio,
         }) => {
-            start_server(cli.config, name, version, instructions, bind, port, stdio).await?;
+            start_server(cli.config, name, version, instructions, bind, port).await?;
         }
         Some(Commands::Config { output, force }) => {
             generate_config(output, force)?;
@@ -119,7 +114,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None,
                 "127.0.0.1".to_string(),
                 8080,
-                false,
             )
             .await?;
         }
@@ -151,7 +145,6 @@ async fn start_server(
     instructions: Option<String>,
     bind: String,
     port: u16,
-    stdio: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting MCP server...");
 
@@ -177,14 +170,10 @@ async fn start_server(
     }
 
     // Configure transport
-    if stdio {
-        config.transport.transport_type = mcp_server::config::TransportType::Stdio;
-    } else {
-        config.transport.transport_type = mcp_server::config::TransportType::Http;
-        if let Some(ref mut http_config) = config.transport.http {
-            http_config.bind_address = bind;
-            http_config.port = port;
-        }
+    config.transport.transport_type = mcp_server::config::TransportType::Http;
+    if let Some(ref mut http_config) = config.transport.http {
+        http_config.bind_address = bind;
+        http_config.port = port;
     }
 
     // Create and start server
@@ -246,7 +235,6 @@ fn show_info() {
     info!("--------------------------------");
     info!("Features:");
     info!("  - HTTP transport with Server-Sent Events (SSE)");
-    info!("  - STDIO transport for subprocess communication");
     info!("  - Resources: File system and HTTP resource providers");
     info!("  - Tools: Extensible tool execution framework");
     info!("  - Prompts: Template-based prompt generation");
