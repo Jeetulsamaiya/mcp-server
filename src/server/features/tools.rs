@@ -611,20 +611,34 @@ impl ToolHandler for CalculatorToolHandler {
             McpError::invalid_params("Parameter 'a' is required and must be a number")
         })?;
 
-        let b = args.get("b").and_then(|v| v.as_f64()).ok_or_else(|| {
-            McpError::invalid_params("Parameter 'b' is required and must be a number")
-        })?;
+        // let b = args.get("b").and_then(|v| v.as_f64()).ok_or_else(|| {
+            
+        //     McpError::invalid_params("Parameter 'b' is required and must be a number")
+        // })?;
+
+        // check if b is provided for all operatrions except sqrt
+        let b = if operation == "sqrt" {
+            0.0
+        } else {
+            args.get("b").and_then(|v| v.as_f64()).ok_or_else(|| {
+                McpError::invalid_params("Parameter 'b' is required and must be a number")
+            })?
+        };
 
         let result = match operation {
-            "add" => a + b,
-            "subtract" => a - b,
-            "multiply" => a * b,
+            "add" => {
+                (a + b) as isize
+            },
+            "subtract" => (a - b) as isize,
+            "multiply" => (a * b) as isize,
             "divide" => {
                 if b == 0.0 {
                     return Ok(ToolResult::error_text("Division by zero".to_string()));
                 }
-                a / b
+                (a / b) as isize
             }
+            "power" => (a.powf(b)) as isize,
+            "sqrt" => (a.sqrt()) as isize,
             _ => {
                 return Ok(ToolResult::error_text(format!(
                     "Unknown operation: {}",
@@ -655,7 +669,7 @@ impl ToolHandler for CalculatorToolHandler {
                 McpError::invalid_params("Operation is required and must be a string")
             })?;
 
-        let valid_operations = ["add", "subtract", "multiply", "divide"];
+        let valid_operations = ["add", "subtract", "multiply", "divide", "power", "sqrt"];
         if !valid_operations.contains(&operation) {
             return Err(McpError::invalid_params(format!(
                 "Invalid operation: {}. Valid operations are: {}",
@@ -671,10 +685,13 @@ impl ToolHandler for CalculatorToolHandler {
             ));
         }
 
-        if !args.get("b").map(|v| v.is_number()).unwrap_or(false) {
-            return Err(McpError::invalid_params(
-                "Parameter 'b' is required and must be a number",
-            ));
+
+        if operation != "sqrt" {
+            if !args.get("b").map(|v| v.is_number()).unwrap_or(false) {
+                return Err(McpError::invalid_params(
+                    "Parameter 'b' is required and must be a number",
+                ));
+            }
         }
 
         Ok(())
@@ -843,7 +860,7 @@ impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
             handlers: Vec::new(),
-            auto_discover_builtin: true,
+            auto_discover_builtin: true, 
             enable_all_by_default: true,
         }
     }
